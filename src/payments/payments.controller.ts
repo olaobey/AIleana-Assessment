@@ -46,7 +46,7 @@ export class PaymentsController {
   @ApiHeader({ name: 'monnify-signature', required: true })
   @ApiBody({ type: MonnifyWebhookDto })
   async webhook(@Req() req: Request, @Body() body: MonnifyWebhookDto) {
-    const signature = req.headers['monnify-signature'] as string;
+    const signature = req.headers['monnify-signature']
 
     const computedHash = crypto
       .createHash('sha512')
