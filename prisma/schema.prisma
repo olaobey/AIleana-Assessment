@@ -1,0 +1,118 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
+enum PaymentProvider {
+  MONNIFY
+}
+
+enum PaymentStatus {
+  INITIATED
+  PENDING
+  PAID
+  FAILED
+}
+
+enum CallStatus {
+  INITIATED
+  RINGING
+  ACCEPTED
+  ENDED
+  FAILED
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  firstName String?
+  lastName  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  wallet    Wallet?
+  callsAsCaller CallSession[] @relation("Caller")
+  callsAsCallee CallSession[] @relation("Callee")
+  paymentIntents PaymentIntent[] 
+}
+
+model Wallet {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  balance   Decimal  @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User          @relation(fields: [userId], references: [id])
+  transactions WalletTx[]
+}
+
+model WalletTx {
+  id          String            @id @default(uuid())
+  walletId    String
+  type        TransactionType
+  amount      Decimal
+  status      TransactionStatus @default(PENDING)
+  reference   String            @unique
+  narration   String?
+  createdAt   DateTime          @default(now())
+
+  wallet      Wallet @relation(fields: [walletId], references: [id])
+
+  @@index([walletId, createdAt])
+}
+
+model PaymentIntent {
+  id               String         @id @default(uuid())
+  userId           String
+  provider         PaymentProvider
+  amount           Decimal
+  currency         String         @default("NGN")
+  paymentReference String         @unique
+  status           PaymentStatus  @default(INITIATED)
+
+  monnifyTransactionReference String?
+  checkoutUrl      String?
+
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user             User @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+}
+
+model CallSession {
+  id        String     @id @default(uuid())
+  callerId  String
+  calleeId  String
+  status    CallStatus @default(INITIATED)
+
+  startedAt DateTime?
+  acceptedAt DateTime?
+  endedAt   DateTime?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  caller User @relation("Caller", fields: [callerId], references: [id])
+  callee User @relation("Callee", fields: [calleeId], references: [id])
+
+  @@index([callerId, createdAt])
+  @@index([calleeId, createdAt])
+}
