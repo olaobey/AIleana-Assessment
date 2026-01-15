@@ -6,6 +6,7 @@ import {
   Req,
   Body,
   UnauthorizedException,
+  BadRequestException,
 } from '@nestjs/common';
 import {
   ApiBody,
@@ -46,7 +47,12 @@ export class PaymentsController {
   @ApiHeader({ name: 'monnify-signature', required: true })
   @ApiBody({ type: MonnifyWebhookDto })
   async webhook(@Req() req: Request, @Body() body: MonnifyWebhookDto) {
-    const signature = req.headers['monnify-signature']
+    const signature = (req.headers as unknown as Record<string, string>)[
+      'monnify-signature'
+    ];
+    if (!signature) {
+      throw new BadRequestException('Missing monnify-signature header');
+    }
 
     const computedHash = crypto
       .createHash('sha512')
