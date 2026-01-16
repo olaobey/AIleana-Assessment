@@ -8,6 +8,7 @@ COPY package*.json ./
 RUN npm install
 
 COPY prisma ./prisma
+RUN rm -rf node_modules/.prisma
 RUN npx prisma generate
 
 COPY . .
@@ -18,7 +19,6 @@ RUN npm run build
 FROM node:20-bookworm-slim AS runner
 WORKDIR /app
 
-# 🔥 INSTALL OPENSSL IN RUNTIME IMAGE
 RUN apt-get update -y && apt-get install -y openssl
 
 COPY package*.json ./
