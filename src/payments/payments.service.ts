@@ -16,17 +16,12 @@ export class PaymentsService {
     private readonly monnify: MonnifyClient,
   ) {}
 
-  /**
-   * Initialize wallet top-up
-   */
   async initializeWalletTopup(userId: string, amount: number) {
-    if (!Number.isFinite(amount) || amount <= 0) {
-      throw new BadRequestException('Amount must be > 0');
+    if (amount <= 0) {
+      throw new BadRequestException('Amount must be greater than zero');
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-    });
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw new NotFoundException('User not found');
 
     const paymentReference = `AIL-${Date.now()}-${Math.random()
@@ -37,22 +32,20 @@ export class PaymentsService {
       data: {
         userId,
         provider: 'MONNIFY',
-        amount: new Prisma.Decimal(amount),
+        amount,
         currency: 'NGN',
         paymentReference,
         status: PaymentStatus.INITIATED,
       },
     });
 
-    // ---------------- MOCK MODE ----------------
     if (env.PAYMENTS_MODE === 'mock') {
       return {
-        paymentReference: intent.paymentReference,
-        checkoutUrl: `https://mock.monnify/checkout/${intent.paymentReference}`,
+        paymentReference,
+        checkoutUrl: `https://mock.monnify/checkout/${paymentReference}`,
       };
     }
 
-    // ---------------- REAL MODE ----------------
     const init = await this.monnify.initTransaction({
       amount,
       customerName:
@@ -70,10 +63,7 @@ export class PaymentsService {
         where: { id: intent.id },
         data: { status: PaymentStatus.FAILED },
       });
-
-      throw new BadRequestException(
-        init.responseMessage ?? 'Monnify initialization failed',
-      );
+      throw new BadRequestException(init.responseMessage);
     }
 
     await this.prisma.paymentIntent.update({
@@ -88,13 +78,9 @@ export class PaymentsService {
     return {
       paymentReference,
       checkoutUrl: init.responseBody.checkoutUrl,
-      monnifyTransactionReference: init.responseBody.transactionReference,
     };
   }
 
-  /**
-   * Verify payment and credit wallet (IDEMPOTENT)
-   */
   async verifyAndCredit(
     paymentReference: string,
   ): Promise<VerifyAndCreditResult> {
@@ -102,83 +88,56 @@ export class PaymentsService {
       where: { paymentReference },
     });
 
-    if (!intent) {
-      throw new NotFoundException('Payment intent not found');
-    }
+    if (!intent) throw new NotFoundException('Payment intent not found');
 
-    // ---------- Already paid (idempotent) ----------
     if (intent.status === PaymentStatus.PAID) {
       return {
         success: true,
-        message: 'Payment already verified and wallet credited',
+        message: 'Already credited',
         transactionId: intent.id,
         amount: Number(intent.amount),
         credited: true,
       };
     }
 
-    // ---------- MOCK MODE ----------
     if (env.PAYMENTS_MODE === 'mock') {
-      return this.creditWalletForIntent(intent.id);
+      return this.creditWallet(intent.id);
     }
 
-    // ---------- REAL MODE ----------
     const statusResp =
       await this.monnify.getTransactionStatusByPaymentReference(
         paymentReference,
       );
 
     if (!statusResp.requestSuccessful) {
-      throw new BadRequestException('Unable to verify payment');
+      throw new BadRequestException('Verification failed');
     }
 
-    const paymentStatus = statusResp.responseBody
-      .paymentStatus as PaymentStatus;
-
-    if (paymentStatus === PaymentStatus.PAID) {
-      return this.creditWalletForIntent(intent.id);
+    if (statusResp.responseBody.paymentStatus !== 'PAID') {
+      return {
+        success: false,
+        message: 'Payment not completed',
+        transactionId: intent.id,
+        amount: Number(intent.amount),
+        credited: false,
+      };
     }
 
-    // Update intent for FAILED / PENDING
-    await this.prisma.paymentIntent.update({
-      where: { id: intent.id },
-      data: {
-        status:
-          paymentStatus === PaymentStatus.FAILED
-            ? PaymentStatus.FAILED
-            : PaymentStatus.PENDING,
-      },
-    });
-
-    return {
-      success: false,
-      message: `Payment is ${paymentStatus}`,
-      transactionId: intent.id,
-      amount: Number(intent.amount),
-      credited: false,
-    };
+    return this.creditWallet(intent.id);
   }
 
-  /**
-   * Credits wallet safely inside a transaction (IDEMPOTENT)
-   */
-  private async creditWalletForIntent(
-    intentId: string,
-  ): Promise<VerifyAndCreditResult> {
+  private async creditWallet(intentId: string): Promise<VerifyAndCreditResult> {
     return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const intent = await tx.paymentIntent.findUnique({
         where: { id: intentId },
       });
 
-      if (!intent) {
-        throw new NotFoundException('Payment intent not found');
-      }
+      if (!intent) throw new NotFoundException('Payment intent not found');
 
-      // ---------- Idempotency ----------
       if (intent.status === PaymentStatus.PAID) {
         return {
           success: true,
-          message: 'Payment already verified and wallet credited',
+          message: 'Already credited',
           transactionId: intent.id,
           amount: Number(intent.amount),
           credited: true,
@@ -189,12 +148,7 @@ export class PaymentsService {
         where: { userId: intent.userId },
       });
 
-      if (!wallet) {
-        throw new NotFoundException('Wallet not found');
-      }
-
-      // Unique ledger reference prevents double credit
-      const txRef = `TOPUP:${intent.paymentReference}`;
+      if (!wallet) throw new NotFoundException('Wallet not found');
 
       await tx.walletTx.create({
         data: {
@@ -202,16 +156,14 @@ export class PaymentsService {
           type: 'CREDIT',
           amount: intent.amount,
           status: 'SUCCESS',
-          reference: txRef,
+          reference: `TOPUP:${intent.paymentReference}`,
           narration: 'Wallet top-up via Monnify',
         },
       });
 
       await tx.wallet.update({
         where: { id: wallet.id },
-        data: {
-          balance: { increment: intent.amount },
-        },
+        data: { balance: { increment: intent.amount } },
       });
 
       await tx.paymentIntent.update({

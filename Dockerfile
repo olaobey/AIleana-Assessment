@@ -1,25 +1,36 @@
-FROM node:20-bookworm-slim
-
+# ---------- builder ----------
+FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
-# Install OpenSSL (required by Prisma)
+# 🔑 REQUIRED for Prisma
 RUN apt-get update -y && apt-get install -y openssl
 
-# Copy package files
 COPY package*.json ./
-
-# Install deps
 RUN npm install
 
-# Copy Prisma schema FIRST
+# copy prisma schema first
 COPY prisma ./prisma
 
-# Generate Prisma Client (CRITICAL)
+# generate prisma client
 RUN npx prisma generate
 
-# Copy source & build
+# copy source and build
 COPY . .
 RUN npm run build
+
+
+# ---------- runner ----------
+FROM node:20-bookworm-slim AS runner
+WORKDIR /app
+
+RUN apt-get update -y && apt-get install -y openssl
+
+COPY package*.json ./
+RUN npm install --omit=dev
+
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 CMD ["node", "dist/main.js"]
