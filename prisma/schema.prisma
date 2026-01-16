@@ -1,6 +1,5 @@
 generator client {
   provider      = "prisma-client-js"
-  engineType    = "dataproxy"
   binaryTargets = ["native", "linux-arm64-openssl-3.0.x"]
 }
 
