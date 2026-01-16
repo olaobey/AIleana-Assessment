@@ -1,0 +1,12 @@
+# Ignore node_modules and build outputs
+node_modules
+dist
+
+# Ignore logs and temp files
+*.log
+*.tmp
+*.env
+
+# Git and Docker
+.git
+.docker
