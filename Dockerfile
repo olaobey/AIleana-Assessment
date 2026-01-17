@@ -4,9 +4,18 @@ FROM node:20-bullseye-slim AS builder
 
 WORKDIR /app
 
-# Install system deps needed by Prisma engines (includes libssl1.1 on bullseye)
+# System deps:
+# - python3 + build-essential: required for node-gyp (argon2)
+# - openssl + libssl1.1: for Prisma engine (if it defaults to openssl-1.1)
 RUN apt-get update -y \
-  && apt-get install -y openssl libssl1.1 ca-certificates \
+  && apt-get install -y \
+    python3 \
+    make \
+    g++ \
+    build-essential \
+    openssl \
+    libssl1.1 \
+    ca-certificates \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
@@ -25,7 +34,7 @@ FROM node:20-bullseye-slim AS runner
 
 WORKDIR /app
 
-# Runtime deps (libssl1.1 required if Prisma selects openssl-1.1.x)
+# Runtime deps only (no compilers needed here)
 RUN apt-get update -y \
   && apt-get install -y openssl libssl1.1 ca-certificates \
   && rm -rf /var/lib/apt/lists/*
